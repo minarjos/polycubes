@@ -1,7 +1,9 @@
+#include <set>
 #include <map>
 #include <vector>
 #include <fstream>
 #include <iostream>
+#include <cassert>
 
 // struct representing triplet of coordinates
 struct position
@@ -42,6 +44,195 @@ struct cube
     bool visited;
 };
 
+// it might be useful to distinguish different types of squares
+enum class square_type
+{
+    top_base,
+    bottom_base,
+    circumference,
+    hole
+};
+
+namespace direction
+{
+    enum direction
+    {
+        up = 0,
+        left = 1,
+        down = 2,
+        right = 3
+    };
+
+    void operator++(direction &dir, int)
+    {
+        switch (dir)
+        {
+        case up:
+            dir = left;
+            break;
+        case left:
+            dir = down;
+            break;
+        case down:
+            dir = right;
+            break;
+        case right:
+            dir = up;
+        }
+    }
+    void operator--(direction &dir, int)
+    {
+        dir++;
+        dir++;
+        dir++;
+    }
+}
+
+// same as position, one for two coordinates
+struct plane_position
+{
+    int x, y;
+
+    bool operator<(const plane_position &pos) const
+    {
+        return x == pos.x ? y < pos.y : x < pos.x;
+    }
+
+    bool operator==(const plane_position &pos) const
+    {
+        return x == pos.x && y == pos.y;
+    }
+
+    bool operator!=(const plane_position &pos) const
+    {
+        return x != pos.x || y != pos.y;
+    }
+
+    plane_position up() const { return {x, y + 1}; }
+    plane_position down() const { return {x, y - 1}; }
+    plane_position left() const { return {x - 1, y}; }
+    plane_position right() const { return {x + 1, y}; }
+
+    // order matters
+    std::vector<plane_position> neighbors() const
+    {
+        return {up(), left(), down(), right()};
+    }
+};
+
+// struct representing square of unfolding
+struct square
+{
+    plane_position pos;
+    square_type type;
+};
+
+// unfolding of some polycube, consists of several squares
+class plane
+{
+public:
+    std::map<plane_position, square> squares;
+};
+
+// cube for one-layer polycubes
+struct plane_cube
+{
+    int index;
+    plane_position pos;
+    // in order: up, left, down, right
+    std::vector<bool> circumefence = {false, false, false, false};
+};
+
+class plane_polycube
+{
+public:
+    int n;
+    int h = 0;
+    std::vector<std::set<plane_position>> holes;
+    std::set<plane_position> hole_cubes;
+    std::map<plane_position, plane_cube> cubes;
+    void caluclate_circumference();
+    void calculate_holes();
+
+private:
+    void hole_dfs(plane_position pos, int hole_index);
+};
+
+void plane_polycube::hole_dfs(plane_position pos, int hole_index)
+{
+    if (holes[hole_index].count(pos) || cubes.count(pos))
+        return;
+    holes[hole_index].insert(pos);
+    hole_cubes.insert(pos);
+    for (auto neighbor : pos.neighbors())
+        hole_dfs(neighbor, hole_index);
+}
+
+void plane_polycube::calculate_holes()
+{
+    for (auto &&pair : cubes)
+    {
+        direction::direction dir = direction::up;
+        do
+        {
+            plane_position neighbor = pair.first.neighbors()[dir];
+            if (!cubes.count(neighbor) && !pair.second.circumefence[dir] && !hole_cubes.count(neighbor))
+            {
+                holes.push_back({});
+                hole_dfs(neighbor, h++);
+            }
+            dir++;
+        } while (dir != direction::up);
+    }
+}
+
+// calculates direction of circumference for every cube
+void plane_polycube::caluclate_circumference()
+{
+    // start with the lowest cube of the leftmost column
+    assert(n);
+    plane_position start = cubes.begin()->first;
+    direction::direction dir = direction::left;
+    plane_position pos = start;
+    // annoying edge-case
+    if (n == 1)
+    {
+        do
+        {
+            cubes[pos].circumefence[dir] = true;
+            dir++;
+        } while (dir != direction::left);
+        return;
+    }
+    bool first = true;
+    // continue untill we return to the starting point
+    while (first || pos != start)
+    {
+        while (!cubes.count(pos.neighbors()[dir]))
+        {
+            cubes[pos].circumefence[dir] = true;
+            dir++;
+        }
+        // find the next cube and direction
+        pos = pos.neighbors()[dir];
+        dir--;
+        if (cubes.count(pos.neighbors()[dir]))
+        {
+            pos = pos.neighbors()[dir];
+            dir--;
+        }
+        first = false;
+    }
+    // finish the rest of the first cube
+    while (!cubes.count(pos.neighbors()[dir]))
+    {
+        cubes[pos].circumefence[dir] = true;
+        dir++;
+        if (dir == direction::left)
+            break;
+    }
+}
+
 // main class for polycube
 class polycube
 {
@@ -51,10 +242,38 @@ public:
     bool connected();
     bool polyhedron();
     int one_layer();
+    plane_polycube to_one_layer();
 
 private:
     int dfs(position pos);
 };
+
+plane_position from_position(position pos, int axis)
+{
+    assert(axis >= 1 && axis <= 3);
+    if (axis == 1)
+        return {pos.y, pos.z};
+    else if (axis == 2)
+        return {pos.x, pos.z};
+    return {pos.x, pos.y};
+}
+
+plane_polycube polycube::to_one_layer()
+{
+    plane_polycube pl_pc;
+    pl_pc.n = n;
+    int axis = one_layer();
+    assert(axis);
+    for (auto pair : cubes)
+    {
+        plane_cube pl_c;
+        pl_c.index = pair.second.index;
+        plane_position pos = from_position(pair.first, axis);
+        pl_c.pos = pos;
+        pl_pc.cubes[pos] = pl_c;
+    }
+    return pl_pc;
+}
 
 // returns 0 in case of multi-layer polycube, otherwise returns index representing the planar axis
 int polycube::one_layer()
@@ -116,50 +335,41 @@ bool polycube::polyhedron()
     return true;
 }
 
-// it might be useful to distinguish different types of squares
-enum class square_type
-{
-    top_base,
-    bottom_base,
-    circumference,
-    hole
-};
-
-// same as position, one for two coordinates
-struct plane_position
-{
-    int x, y;
-
-    bool operator<(const plane_position &pos) const
-    {
-        return x == pos.x ? y < pos.y : x < pos.x;
-    }
-
-    plane_position up() { return {x, y + 1}; }
-    plane_position down() { return {x, y - 1}; }
-    plane_position left() { return {x - 1, y}; }
-    plane_position right() { return {x + 1, y}; }
-};
-
-// struct representing square of unfolding
-struct square
-{
-    plane_position pos;
-    square_type type;
-};
-
-// plane of the unfolding, consists of several squares
-class plane
-{
-public:
-    std::map<plane_position, square> squares;
-};
-
 int main()
 {
     polycube pc;
     std::cin >> pc;
-    std::cout << pc.connected() << std::endl;
-    std::cout << pc.one_layer() << std::endl;
+    std::cerr << "Loaded polycube consisting of " << pc.n << " cubes." << std::endl;
+    if (pc.connected())
+        std::cerr << "The polycube is connected." << std::endl;
+    else
+    {
+        std::cerr << "The polycube is not connected, please enter a connceted polycube." << std::endl;
+        return 0;
+    }
+    if (pc.one_layer())
+    {
+        std::cerr << "The polycube is one-layered." << std::endl;
+        plane_polycube pl_pc = pc.to_one_layer();
+        pl_pc.caluclate_circumference();
+        for (auto pair : pl_pc.cubes)
+        {
+            std::cerr << pair.second.index << ": ";
+            for (auto x : pair.second.circumefence)
+                std::cerr << x << " ";
+            std::cerr << std::endl;
+        }
+        pl_pc.calculate_holes();
+        if(pl_pc.h == 0)
+            std::cerr << "The polycube contains no holes." << std::endl;
+        else if (pl_pc.h == (int)pl_pc.hole_cubes.size())
+            std::cerr << "The polycube contains " << pl_pc.h << " holes, all of which are cubic." << std::endl;
+        else
+            std::cerr << "The polycube contains " << pl_pc.h << " holes." << std::endl;
+    }
+    else
+    {
+        std::cerr << "I can only unfold one-layer polycubes now, this may change in the future." << std::endl;
+    }
     return 0;
 }

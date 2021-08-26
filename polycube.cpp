@@ -57,10 +57,10 @@ enum class square_type
 // styles for different square types
 std::map<square_type, std::string> square_style = 
 {
-    {square_type::top_base, "fill:green;stroke:black;stroke-width:5;fill-opacity:0.5"},
+    {square_type::top_base, "fill:blue;stroke:black;stroke-width:5;fill-opacity:0.5"},
     {square_type::bottom_base, "stroke-alignment:inner;fill:blue;stroke:black;stroke-width:5;fill-opacity:0.5"},
     {square_type::circumference, "fill:red;stroke:black;stroke-width:5;fill-opacity:0.5"},
-    {square_type::hole, ""},
+    {square_type::hole, "fill:purple;stroke:black;stroke-width:5;fill-opacity:0.7"},
 };
 
 // enum for directions in plane
@@ -193,11 +193,69 @@ public:
     std::vector<std::pair<plane_position, direction::direction>> circumference;
     void caluclate_circumference();
     void calculate_holes();
+    bool big_holes();
     unfolding unfold_no_holes();
+    unfolding unfold_big_holes();
 
 private:
     void hole_dfs(plane_position pos, int hole_index);
 };
+
+std::ostream &operator<<(std::ostream &os, plane_polycube &pl_pc)
+{
+    unfolding uf;
+    for(auto pair : pl_pc.cubes)
+        uf.squares[pair.first] = {pair.first, square_type::top_base};
+    os << uf;
+    return os;
+}
+
+// checkes, whether there is one-wide gap in some of the holes
+bool plane_polycube::big_holes()
+{
+    for(auto pos : hole_cubes)
+    {
+        if(!hole_cubes.count(pos.left()) && !hole_cubes.count(pos.right()))
+            return false;
+        if(!hole_cubes.count(pos.up()) && !hole_cubes.count(pos.down()))
+            return false;        
+    }
+    return true;
+}
+
+// unfolds one-layer polycube with big holes
+unfolding plane_polycube::unfold_big_holes()
+{
+    assert(n > 0);
+    unfolding uf;
+    plane_position min_pos = {0, (int)1e9};
+    for (auto pair : circumference)
+    {
+        if (pair.second == direction::down && pair.first.y < min_pos.y)
+            min_pos = pair.first;
+    }
+    plane_position pos = min_pos.down();
+    for (int i = 0; i < (int)circumference.size(); i++, pos = pos.right())
+        uf.squares[pos] = {pos, square_type::circumference};
+    for (auto pair : cubes)
+    {
+        uf.squares[pair.first] = {pair.first, square_type::top_base};
+        // unfold left and right parts of hole
+        if(!cubes[pair.first].circumefence[direction::left] && !cubes.count(pair.first.left()))
+            uf.squares[pair.first.left()] = {pair.first.left(), square_type::hole};
+        if(!cubes[pair.first].circumefence[direction::right] && !cubes.count(pair.first.right()))
+            uf.squares[pair.first.right()] = {pair.first.right(), square_type::hole};
+
+        pos = {pair.first.x, 2 * min_pos.y - pair.first.y - 2};
+        // unfold top and bottom parts of hole
+        uf.squares[pos] = {pos, square_type::bottom_base};
+        if(!cubes[pair.first].circumefence[direction::up] && !cubes.count(pair.first.up()))
+            uf.squares[pos.down()] = {pos.down(), square_type::hole};
+        if(!cubes[pair.first].circumefence[direction::down] && !cubes.count(pair.first.down()))
+            uf.squares[pos.up()] = {pos.up(), square_type::hole};
+    }
+    return uf;
+}
 
 // unfolds one-layer polycube without holes
 unfolding plane_polycube::unfold_no_holes()
@@ -424,6 +482,7 @@ int main()
     {
         std::cerr << "The polycube is one-layered." << std::endl;
         plane_polycube pl_pc = pc.to_one_layer();
+        std :: cout << pl_pc;
         pl_pc.caluclate_circumference();
         std::cerr << "The circumference has lenght " << pl_pc.circumference.size() << "." << std::endl;
         pl_pc.calculate_holes();
@@ -435,6 +494,12 @@ int main()
         }
         else if (pl_pc.h == (int)pl_pc.hole_cubes.size())
             std::cerr << "The polycube contains " << pl_pc.h << " holes, all of which are cubic." << std::endl;
+        else if (pl_pc.big_holes())
+        {
+            std::cerr << "The polycube contains " << pl_pc.h << " holes, all of which are at least 2-wide." << std::endl;
+            unfolding uf = pl_pc.unfold_big_holes();
+            std::cout << uf;
+        }
         else
             std::cerr << "The polycube contains " << pl_pc.h << " holes." << std::endl;
     }

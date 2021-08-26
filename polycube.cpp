@@ -1,5 +1,6 @@
 #include <set>
 #include <map>
+#include <string>
 #include <vector>
 #include <fstream>
 #include <iostream>
@@ -53,6 +54,16 @@ enum class square_type
     hole
 };
 
+// styles for different square types
+std::map<square_type, std::string> square_style = 
+{
+    {square_type::top_base, "fill:green;stroke:black;stroke-width:5;fill-opacity:0.5"},
+    {square_type::bottom_base, "stroke-alignment:inner;fill:blue;stroke:black;stroke-width:5;fill-opacity:0.5"},
+    {square_type::circumference, "fill:red;stroke:black;stroke-width:5;fill-opacity:0.5"},
+    {square_type::hole, ""},
+};
+
+// enum for directions in plane
 namespace direction
 {
     enum direction
@@ -63,6 +74,7 @@ namespace direction
         right = 3
     };
 
+    // cyclic increment
     void operator++(direction &dir, int)
     {
         switch (dir)
@@ -134,10 +146,29 @@ public:
     std::map<plane_position, square> squares;
 };
 
+//generates svg output
 std::ostream &operator<<(std::ostream &os, unfolding &uf)
 {
+    int minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
     for (auto pair : uf.squares)
-        os << pair.first.x << " " << pair.first.y << std::endl;
+    {
+        minx = std::min(minx, pair.first.x);
+        miny = std::min(miny, pair.first.y);
+        maxy = std::max(maxy, pair.first.y);
+        maxx = std::max(maxx, pair.first.x);
+    }
+    int square_size = 100;
+    int margin = 20;
+    int height = (maxy - miny + 1) * square_size + 2*margin;
+    int width = (maxx - minx + 1) * square_size + 2*margin;
+    os << "<svg width=\"" << width << "\" height=\"" << height << "\">" << std::endl;
+    for (auto pair : uf.squares)
+    {
+        int x = square_size * (pair.first.x - minx) + margin;
+        int y = square_size * (pair.first.y - miny) + margin;
+        os << "<rect x=\"" << x << "\" y=\"" << y << "\" width=\"" << square_size << "\" height=\"" << square_size << "\", style=\"" << square_style[pair.second.type] << "\"/>" << std::endl;
+    }
+    os << "</svg>" << std::endl;
     return os;
 }
 
@@ -150,6 +181,7 @@ struct plane_cube
     std::vector<bool> circumefence = {false, false, false, false};
 };
 
+// class representing one-layer polycubes
 class plane_polycube
 {
 public:
@@ -167,6 +199,7 @@ private:
     void hole_dfs(plane_position pos, int hole_index);
 };
 
+// unfolds one-layer polycube without holes
 unfolding plane_polycube::unfold_no_holes()
 {
     assert(n > 0);
@@ -190,6 +223,7 @@ unfolding plane_polycube::unfold_no_holes()
     return uf;
 }
 
+// dfs searching for holes
 void plane_polycube::hole_dfs(plane_position pos, int hole_index)
 {
     if (holes[hole_index].count(pos) || cubes.count(pos))
@@ -200,6 +234,7 @@ void plane_polycube::hole_dfs(plane_position pos, int hole_index)
         hole_dfs(neighbor, hole_index);
 }
 
+// finds all holes and saves them into appripriate sets
 void plane_polycube::calculate_holes()
 {
     for (auto &&pair : cubes)
@@ -284,6 +319,7 @@ private:
     int dfs(position pos);
 };
 
+// deletes one of coordinates from position
 plane_position from_position(position pos, int axis)
 {
     assert(axis >= 1 && axis <= 3);
@@ -294,6 +330,7 @@ plane_position from_position(position pos, int axis)
     return {pos.x, pos.y};
 }
 
+// creates one-layer polycube from polycube (basically just deletes one of the coordinates)
 plane_polycube polycube::to_one_layer()
 {
     plane_polycube pl_pc;
@@ -389,13 +426,6 @@ int main()
         plane_polycube pl_pc = pc.to_one_layer();
         pl_pc.caluclate_circumference();
         std::cerr << "The circumference has lenght " << pl_pc.circumference.size() << "." << std::endl;
-        // for (auto pair : pl_pc.cubes)
-        // {
-        //     std::cerr << pair.second.index << ": ";
-        //     for (auto x : pair.second.circumefence)
-        //         std::cerr << x << " ";
-        //     std::cerr << std::endl;
-        // }
         pl_pc.calculate_holes();
         if (pl_pc.h == 0)
         {

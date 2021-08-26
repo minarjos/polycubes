@@ -128,11 +128,18 @@ struct square
 };
 
 // unfolding of some polycube, consists of several squares
-class plane
+class unfolding
 {
 public:
     std::map<plane_position, square> squares;
 };
+
+std::ostream &operator<<(std::ostream &os, unfolding &uf)
+{
+    for (auto pair : uf.squares)
+        os << pair.first.x << " " << pair.first.y << std::endl;
+    return os;
+}
 
 // cube for one-layer polycubes
 struct plane_cube
@@ -151,12 +158,37 @@ public:
     std::vector<std::set<plane_position>> holes;
     std::set<plane_position> hole_cubes;
     std::map<plane_position, plane_cube> cubes;
+    std::vector<std::pair<plane_position, direction::direction>> circumference;
     void caluclate_circumference();
     void calculate_holes();
+    unfolding unfold_no_holes();
 
 private:
     void hole_dfs(plane_position pos, int hole_index);
 };
+
+unfolding plane_polycube::unfold_no_holes()
+{
+    assert(n > 0);
+    assert(h == 0);
+    unfolding uf;
+    plane_position min_pos = {0, (int)1e9};
+    for (auto pair : circumference)
+    {
+        if (pair.second == direction::down && pair.first.y < min_pos.y)
+            min_pos = pair.first;
+    }
+    plane_position pos = min_pos.down();
+    for (int i = 0; i < (int)circumference.size(); i++, pos = pos.right())
+        uf.squares[pos] = {pos, square_type::circumference};
+    for (auto pair : cubes)
+    {
+        uf.squares[pair.first] = {pair.first, square_type::top_base};
+        pos = {pair.first.x, 2 * min_pos.y - pair.first.y - 2};
+        uf.squares[pos] = {pos, square_type::bottom_base};
+    }
+    return uf;
+}
 
 void plane_polycube::hole_dfs(plane_position pos, int hole_index)
 {
@@ -191,6 +223,7 @@ void plane_polycube::caluclate_circumference()
 {
     // start with the lowest cube of the leftmost column
     assert(n);
+    circumference.clear();
     plane_position start = cubes.begin()->first;
     direction::direction dir = direction::left;
     plane_position pos = start;
@@ -200,6 +233,7 @@ void plane_polycube::caluclate_circumference()
         do
         {
             cubes[pos].circumefence[dir] = true;
+            circumference.push_back({pos, dir});
             dir++;
         } while (dir != direction::left);
         return;
@@ -211,6 +245,7 @@ void plane_polycube::caluclate_circumference()
         while (!cubes.count(pos.neighbors()[dir]))
         {
             cubes[pos].circumefence[dir] = true;
+            circumference.push_back({pos, dir});
             dir++;
         }
         // find the next cube and direction
@@ -226,10 +261,11 @@ void plane_polycube::caluclate_circumference()
     // finish the rest of the first cube
     while (!cubes.count(pos.neighbors()[dir]))
     {
-        cubes[pos].circumefence[dir] = true;
-        dir++;
         if (dir == direction::left)
             break;
+        circumference.push_back({pos, dir});
+        cubes[pos].circumefence[dir] = true;
+        dir++;
     }
 }
 
@@ -352,16 +388,21 @@ int main()
         std::cerr << "The polycube is one-layered." << std::endl;
         plane_polycube pl_pc = pc.to_one_layer();
         pl_pc.caluclate_circumference();
-        for (auto pair : pl_pc.cubes)
-        {
-            std::cerr << pair.second.index << ": ";
-            for (auto x : pair.second.circumefence)
-                std::cerr << x << " ";
-            std::cerr << std::endl;
-        }
+        std::cerr << "The circumference has lenght " << pl_pc.circumference.size() << "." << std::endl;
+        // for (auto pair : pl_pc.cubes)
+        // {
+        //     std::cerr << pair.second.index << ": ";
+        //     for (auto x : pair.second.circumefence)
+        //         std::cerr << x << " ";
+        //     std::cerr << std::endl;
+        // }
         pl_pc.calculate_holes();
-        if(pl_pc.h == 0)
+        if (pl_pc.h == 0)
+        {
             std::cerr << "The polycube contains no holes." << std::endl;
+            unfolding uf = pl_pc.unfold_no_holes();
+            std::cout << uf;
+        }
         else if (pl_pc.h == (int)pl_pc.hole_cubes.size())
             std::cerr << "The polycube contains " << pl_pc.h << " holes, all of which are cubic." << std::endl;
         else

@@ -23,8 +23,18 @@ struct position
         return x < pos.x;
     }
 
+    bool operator==(const position pos) const
+    {
+        return x == pos.x && y == pos.y && z == pos.z;
+    }
+
+    bool operator!=(const position pos) const
+    {
+        return x != pos.x || y != pos.y || z != pos.z;
+    }
+
     // list of neighboring positions
-    std::vector<position> neighbors()
+    std::vector<position> neighbors() const
     {
         return {
             {x - 1, y, z},
@@ -194,15 +204,63 @@ public:
     unfolding unfold_no_holes();
     unfolding unfold_big_holes();
     unfolding unfold_1x1();
+    unfolding unfold_orthotree();
 
 private:
     void hole_dfs(plane_position pos, int hole_index);
     void stripe(plane_position head, plane_position uf_head, direction::direction dir, direction::direction uf_dir, unfolding &uf);
+    int degree(plane_position pos);
 };
 
+// returns number of neighboring cubes
+int plane_polycube::degree(plane_position pos)
+{
+    int deg = 0;
+    for (auto neighbor : pos.neighbors())
+        deg += cubes.count(neighbor);
+    return deg;
+}
+
+// unfolds one-layer orthotree to a unfolding of height 3
+unfolding plane_polycube::unfold_orthotree()
+{
+    unfolding uf;
+    plane_position uf_pos = {0, 0};
+    // maping from cube and direction to position in unfolding
+    std::map<std::pair<plane_position, direction::direction>, plane_position> to_uf;
+    for (int i = 0; i < (int)circumference.size(); i++, uf_pos = uf_pos.right())
+    {
+        uf.squares[uf_pos] = {uf_pos, square_type::circumference};
+        to_uf[circumference[i]] = uf_pos;
+    }
+    for (auto pair : cubes)
+    {
+        // we start to the left, this is important
+        direction::direction dir = direction::left;
+        for (int i = 0; i < 4; i++, dir++)
+        {
+            if (pair.second.circumefence[dir])
+            {
+                uf.squares[to_uf[{pair.first, dir}].up()] = {to_uf[{pair.first, dir}].up(), square_type::top_base};
+                uf.squares[to_uf[{pair.first, dir}].down()] = {to_uf[{pair.first, dir}].down(), square_type::bottom_base};
+                // if the left neighbor has degree 4, we unfold it together with this square
+                if (cubes.count(pair.first.left()) && degree(pair.first.left()) == 4)
+                {
+                    uf.squares[to_uf[{pair.first, dir}].up().left()] = {to_uf[{pair.first, dir}].up().left(), square_type::top_base};
+                    uf.squares[to_uf[{pair.first, dir}].down().left()] = {to_uf[{pair.first, dir}].down().left(), square_type::bottom_base};
+                }
+                break;
+            }
+        }
+    }
+    return uf;
+}
+
+// unfolds stripe of width from given position and direction
 void plane_polycube::stripe(plane_position head, plane_position uf_head, direction::direction dir, direction::direction uf_dir, unfolding &uf)
 {
     int orientation = uf_dir == direction::up ? -1 : 1;
+    square_type st = uf_dir == direction::up ? square_type::top_base : square_type::bottom_base;
     plane_position other_head = head.neighbors()[dir - 1];
     plane_position other_uf_head = uf_head.neighbors()[uf_dir + orientation];
 
@@ -211,13 +269,16 @@ void plane_polycube::stripe(plane_position head, plane_position uf_head, directi
 
     while (cubes.count(head) || cubes.count(other_head))
     {
+
+        // the shifts and rotaions are a bit confusing
+        // TODO: check this
         if (cubes.count(head))
-            uf.squares[uf_head] = {uf_head, square_type::top_base};
+            uf.squares[uf_head] = {uf_head, st};
         else if (hole_cubes.count(head))
             uf.squares[uf_head] = {uf_head, square_type::hole};
 
         if (cubes.count(other_head))
-            uf.squares[other_uf_head] = {other_uf_head, square_type::top_base};
+            uf.squares[other_uf_head] = {other_uf_head, st};
         else if (hole_cubes.count(other_head))
             uf.squares[other_uf_head] = {other_uf_head, square_type::hole};
 
@@ -233,17 +294,20 @@ void plane_polycube::stripe(plane_position head, plane_position uf_head, directi
     }
 }
 
+// unfolds one-layer polyhedra with 1x1 holes
 unfolding plane_polycube::unfold_1x1()
 {
     assert(h == (int)hole_cubes.size());
     unfolding uf;
     plane_position uf_pos = {0, 0};
+    // we go around the circumcircle and start stripes in correct places and directions
     for (int i = 0; i < (int)circumference.size(); i++, uf_pos = uf_pos.right())
     {
         uf.squares[uf_pos] = {uf_pos, square_type::circumference};
         plane_position pos = circumference[i].first;
         direction::direction dir = circumference[i].second;
 
+        // the places and directions are quite messy, there might be some mistake
         if (dir == direction::left && (pos.y % 4 + 4) % 4 == 0)
             stripe(pos.up(), uf_pos.up().left(), direction::right, direction::up, uf);
         if (dir == direction::left && (pos.y % 4 + 4) % 4 == 1 && !cubes.count(pos.down()))
@@ -255,7 +319,7 @@ unfolding plane_polycube::unfold_1x1()
             stripe(pos.down(), uf_pos.up().left(), direction::left, direction::up, uf);
 
         if (dir == direction::up && (pos.x % 4 + 4) % 4 == 1)
-            stripe(pos, uf_pos.down(), direction::down, direction::down,uf); 
+            stripe(pos, uf_pos.down(), direction::down, direction::down, uf);
         if (dir == direction::up && (pos.x % 4 + 4) % 4 == 0 && !cubes.count(pos.right()))
             stripe(pos.right(), uf_pos.down().left(), direction::down, direction::down, uf);
 
@@ -431,10 +495,36 @@ public:
     bool polyhedron();
     int one_layer();
     plane_polycube to_one_layer();
+    bool orthotree();
 
 private:
     int dfs(position pos);
+    bool ortho_dfs(position pos, position from);
 };
+
+// returns false if there is a cycle
+bool polycube::ortho_dfs(position pos, position from)
+{
+    if (!cubes.count(pos))
+        return true;
+    if (cubes[pos].visited)
+        return false;
+    cubes[pos].visited = true;
+    for (auto neighbor : pos.neighbors())
+        if (neighbor != from && !ortho_dfs(neighbor, pos))
+            return false;
+    return true;
+}
+
+// returs true iff the polycube is orthotree
+bool polycube::orthotree()
+{
+    for (auto pair : cubes)
+        cubes[pair.first].visited = false;
+    if (!n)
+        return true;
+    return ortho_dfs(cubes.begin()->first, cubes.begin()->first);
+}
 
 // deletes one of coordinates from position
 plane_position from_position(position pos, int axis)
@@ -537,6 +627,8 @@ int main()
         std::cerr << "The polycube is not connected, please enter a connceted polycube." << std::endl;
         return 0;
     }
+    if (pc.orthotree())
+        std::cerr << "The polycube is an orthotree." << std::endl;
     if (pc.one_layer())
     {
         std::cerr << "The polycube is one-layered." << std::endl;
@@ -545,7 +637,12 @@ int main()
         pl_pc.caluclate_circumference();
         std::cerr << "The circumference has lenght " << pl_pc.circumference.size() << "." << std::endl;
         pl_pc.calculate_holes();
-        if (pl_pc.h == 0)
+        if (pc.orthotree())
+        {
+            unfolding uf = pl_pc.unfold_orthotree();
+            std::cout << uf;
+        }
+        else if (pl_pc.h == 0)
         {
             std::cerr << "The polycube contains no holes." << std::endl;
             unfolding uf = pl_pc.unfold_no_holes();

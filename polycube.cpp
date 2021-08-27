@@ -1,11 +1,13 @@
 #include <set>
 #include <map>
 #include <array>
+#include <ctime>
 #include <string>
 #include <vector>
 #include <fstream>
-#include <iostream>
 #include <cassert>
+#include <iostream>
+#include <algorithm>
 
 // struct representing triplet of coordinates
 struct position
@@ -68,7 +70,14 @@ enum class square_type
     top_base,
     bottom_base,
     circumference,
-    hole
+    hole,
+    up,
+    down,
+    front,
+    back,
+    left,
+    right,
+    overlap
 };
 
 // styles for different square types
@@ -78,6 +87,13 @@ std::map<square_type, std::string> square_style =
         {square_type::bottom_base, "stroke-alignment:inner;fill:blue;stroke:black;stroke-width:5;fill-opacity:0.5"},
         {square_type::circumference, "fill:red;stroke:black;stroke-width:5;fill-opacity:0.5"},
         {square_type::hole, "fill:purple;stroke:black;stroke-width:5;fill-opacity:0.7"},
+        {square_type::up, "fill:yellow;stroke:black;stroke-width:5;fill-opacity:0.7"},
+        {square_type::down, "fill:black;stroke:black;stroke-width:5;fill-opacity:0.1"},
+        {square_type::front, "fill:blue;stroke:black;stroke-width:5;fill-opacity:0.7"},
+        {square_type::back, "fill:green;stroke:black;stroke-width:5;fill-opacity:0.7"},
+        {square_type::left, "fill:orange;stroke:black;stroke-width:5;fill-opacity:0.7"},
+        {square_type::right, "fill:red;stroke:black;stroke-width:5;fill-opacity:0.7"},
+        {square_type::overlap, "fill:black;stroke:black;stroke-width:5;fill-opacity:0.7"},
 };
 
 // enum for directions in space
@@ -172,28 +188,22 @@ struct face
     position pos;
     direction_3d::direction dir;
 
-    bool operator< (const face &f) const
+    bool operator<(const face &f) const
     {
         if (pos == f.pos)
             return dir < f.dir;
         return pos < f.pos;
     }
+
+    bool operator==(const face &f) const
+    {
+        return pos == f.pos && dir == f.dir;
+    }
+    bool operator!=(const face &f) const
+    {
+        return pos != f.pos || dir != f.dir;
+    }
 };
-
-class surface
-{
-public:
-    std::map<face, std::array<face, 4>> graph;
-    void connect(face f1, direction::direction d1, face f2, direction::direction d2);
-
-private:
-};
-
-void surface::connect(face f1, direction::direction d1, face f2, direction::direction d2)
-{
-    graph[f1][d1] = f2;
-    graph[f2][d2] = f1;
-}
 
 // unfolding of some polycube, consists of several squares
 class unfolding
@@ -201,6 +211,170 @@ class unfolding
 public:
     std::map<plane_position, square> squares;
 };
+
+class surface
+{
+public:
+    std::map<face, std::array<face, 4>> graph;
+    void connect(face f1, direction::direction d1, face f2, direction::direction d2);
+    std::map<face, std::set<face>> random_spanning_tree();
+    unfolding get_bad_unfolding();
+    int score();
+    void improve();
+    void try_unfold();
+
+private:
+    std::map<face, std::set<face>> tree;
+    std::map<plane_position, std::vector<face>> plane;
+    void dfs(face f);
+    void try_unfold_dfs(face f, plane_position pos, face from, direction::direction from_directions);
+    void accumulate_dfs(face f, face from, std::map<face, std::set<face>> &t, std::vector<face> &acc);
+};
+
+void surface::accumulate_dfs(face f, face from, std::map<face, std::set<face>> &t, std::vector<face> &acc)
+{
+    acc.push_back(f);
+    for (auto nb : t[f])
+        if (nb != from)
+            accumulate_dfs(nb, f, t, acc);
+}
+
+void surface::improve()
+{
+    int best_score = score();
+    std::map<face, std::set<face>> best_tree = tree, old_tree = tree;
+    std::map<plane_position, std::vector<face>> best_plane = plane;
+    for (auto pair : old_tree)
+    {
+        for (auto nb : pair.second)
+        {
+            tree = old_tree;
+            tree[pair.first].erase(nb);
+            tree[nb].erase(pair.first);
+            std::vector<face> a, b;
+            accumulate_dfs(pair.first, pair.first, tree, a);
+            accumulate_dfs(nb, nb, tree, b);
+            for (auto f1 : a)
+            {
+                for (auto f2 : b)
+                {
+                    assert(!tree[f1].count(f2));
+                    assert(!tree[f2].count(f1));
+                    tree[f1].insert(f2);
+                    tree[f2].insert(f1);
+                    try_unfold();
+                    int sc = score();
+                    if (sc > best_score)
+                    {
+                        best_score = sc;
+                        best_tree = tree;
+                        best_plane = plane;
+                        return;
+                    }
+                    tree[f1].erase(f2);
+                    tree[f2].erase(f1);
+                }
+            }
+        }
+    }
+    tree = best_tree;
+    plane = best_plane;
+}
+
+int surface::score()
+{
+    int sc = 100 * plane.size();
+    for (auto pair : tree)
+    {
+        for (auto nb : pair.second)
+        {
+            sc += nb.dir == pair.first.dir;
+            // sc += nb.pos == pair.first.pos;
+        }
+    }
+    return sc;
+}
+
+unfolding surface::get_bad_unfolding()
+{
+    unfolding uf;
+    for (auto pair : plane)
+    {
+        if (pair.second.size() == 1)
+        {
+            if (pair.second[0].dir == direction_3d::up)
+                uf.squares[pair.first] = {pair.first, square_type::up};
+            if (pair.second[0].dir == direction_3d::down)
+                uf.squares[pair.first] = {pair.first, square_type::down};
+            if (pair.second[0].dir == direction_3d::left)
+                uf.squares[pair.first] = {pair.first, square_type::left};
+            if (pair.second[0].dir == direction_3d::right)
+                uf.squares[pair.first] = {pair.first, square_type::right};
+            if (pair.second[0].dir == direction_3d::front)
+                uf.squares[pair.first] = {pair.first, square_type::front};
+            if (pair.second[0].dir == direction_3d::back)
+                uf.squares[pair.first] = {pair.first, square_type::back};
+        }
+        else
+            uf.squares[pair.first] = {pair.first, square_type::overlap};
+    }
+    return uf;
+}
+
+void surface::try_unfold_dfs(face f, plane_position pos, face from, direction::direction up_direction)
+{
+    direction::direction dir = up_direction;
+    for (auto neighbor : graph[f])
+    {
+        if (from != neighbor && tree[f].count(neighbor))
+        {
+            plane[pos.neighbors()[dir]].push_back(neighbor);
+            direction::direction nb_dir = direction::up;
+            while (graph[neighbor][nb_dir] != f)
+                nb_dir++;
+            nb_dir = (dir + 2) - nb_dir;
+            try_unfold_dfs(neighbor, pos.neighbors()[dir], f, nb_dir);
+        }
+        dir++;
+    }
+}
+
+void surface::try_unfold()
+{
+    face start = tree.begin()->first;
+    plane.clear();
+
+    plane[{0, 0}].push_back(start);
+    try_unfold_dfs(start, {0, 0}, start, direction::up);
+}
+
+void surface::dfs(face f)
+{
+    std::vector<direction::direction> dirs = {direction::up, direction::left, direction::down, direction::right};
+    std::random_shuffle(dirs.begin(), dirs.end());
+    for (auto dir : dirs)
+    {
+        if (!tree.count(graph[f][dir]))
+        {
+            tree[f].insert(graph[f][dir]);
+            tree[graph[f][dir]].insert(f);
+            dfs(graph[f][dir]);
+        }
+    }
+}
+
+std::map<face, std::set<face>> surface::random_spanning_tree()
+{
+    tree.clear();
+    dfs(graph.begin()->first);
+    return tree;
+}
+
+void surface::connect(face f1, direction::direction d1, face f2, direction::direction d2)
+{
+    graph[f1][d1] = f2;
+    graph[f2][d2] = f1;
+}
 
 //generates svg output
 std::ostream &operator<<(std::ostream &os, unfolding &uf)
@@ -794,6 +968,7 @@ bool polycube::polyhedron()
 
 int main()
 {
+    std::srand(std::time(NULL));
     polycube pc;
     std::cin >> pc;
     std::cerr << "Loaded polycube consisting of " << pc.n << " cubes." << std::endl;
@@ -807,12 +982,25 @@ int main()
     if (pc.orthotree())
         std::cerr << "The polycube is an orthotree." << std::endl;
     surface surf = pc.get_surface();
-    for(auto pair:surf.graph)
+    surf.random_spanning_tree();
+    surf.try_unfold();
+    unfolding uff = surf.get_bad_unfolding();
+    std::cerr << "Unfolding using heuristics." << std::endl;
+    std::cerr << "Produced unfolding of score " << surf.score() << "." << std::endl;
+    std::cout << uff;
+    int last = surf.score();
+    while(1)
     {
-        std::cerr << pair.first.pos.x << " " << pair.first.pos.y << " " << pair.first.pos.z << " " << pair.first.dir << ":" << std::endl;
-        for (auto fc : pair.second)
-            std::cerr << "\t" << fc.pos.x << " " << fc.pos.y << " " << fc.pos.z << " " << fc.dir << std::endl;
+        surf.improve();
+        uff = surf.get_bad_unfolding();
+        int sc = surf.score();
+        std::cerr << "Produced unfolding of score " << sc << "." << std::endl;
+        std::cout << uff;
+        if(sc == last)
+            break;
+        last = sc;    
     }
+    return 0;
     if (pc.one_layer())
     {
         std::cerr << "The polycube is one-layered." << std::endl;

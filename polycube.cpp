@@ -1,5 +1,6 @@
 #include <set>
 #include <map>
+#include <array>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -33,17 +34,23 @@ struct position
         return x != pos.x || y != pos.y || z != pos.z;
     }
 
+    position left() const { return {x - 1, y, z}; }
+    position right() const { return {x + 1, y, z}; }
+    position down() const { return {x, y - 1, z}; }
+    position up() const { return {x, y + 1, z}; }
+    position front() const { return {x, y, z - 1}; }
+    position back() const { return {x, y, z + 1}; }
+
     // list of neighboring positions
     std::vector<position> neighbors() const
     {
         return {
-            {x - 1, y, z},
-            {x + 1, y, z},
-            {x, y - 1, z},
-            {x, y + 1, z},
-            {x, y, z - 1},
-            {x, y, z + 1},
-        };
+            left(),
+            right(),
+            down(),
+            up(),
+            front(),
+            back()};
     }
 };
 
@@ -72,6 +79,20 @@ std::map<square_type, std::string> square_style =
         {square_type::circumference, "fill:red;stroke:black;stroke-width:5;fill-opacity:0.5"},
         {square_type::hole, "fill:purple;stroke:black;stroke-width:5;fill-opacity:0.7"},
 };
+
+// enum for directions in space
+namespace direction_3d
+{
+    enum direction
+    {
+        left,
+        right,
+        down,
+        up,
+        front,
+        back
+    };
+}
 
 // enum for directions in plane
 namespace direction
@@ -145,6 +166,34 @@ struct square
     plane_position pos;
     square_type type;
 };
+
+struct face
+{
+    position pos;
+    direction_3d::direction dir;
+
+    bool operator< (const face &f) const
+    {
+        if (pos == f.pos)
+            return dir < f.dir;
+        return pos < f.pos;
+    }
+};
+
+class surface
+{
+public:
+    std::map<face, std::array<face, 4>> graph;
+    void connect(face f1, direction::direction d1, face f2, direction::direction d2);
+
+private:
+};
+
+void surface::connect(face f1, direction::direction d1, face f2, direction::direction d2)
+{
+    graph[f1][d1] = f2;
+    graph[f2][d2] = f1;
+}
 
 // unfolding of some polycube, consists of several squares
 class unfolding
@@ -496,11 +545,139 @@ public:
     int one_layer();
     plane_polycube to_one_layer();
     bool orthotree();
+    surface get_surface();
 
 private:
     int dfs(position pos);
     bool ortho_dfs(position pos, position from);
+    void connect_on_cube(position pos, surface &surf);
+    void connect_face_neighbors(position pos, surface &surf);
+    void connect_edge_neighbors(position pos, surface &surf);
 };
+
+void polycube::connect_on_cube(position pos, surface &surf)
+{
+    if (!cubes.count(pos.left()) && !cubes.count(pos.front()))
+        surf.connect({pos, direction_3d::left}, direction::right, {pos, direction_3d::front}, direction::left);
+    if (!cubes.count(pos.front()) && !cubes.count(pos.right()))
+        surf.connect({pos, direction_3d::front}, direction::right, {pos, direction_3d::right}, direction::left);
+    if (!cubes.count(pos.right()) && !cubes.count(pos.back()))
+        surf.connect({pos, direction_3d::right}, direction::right, {pos, direction_3d::back}, direction::left);
+    if (!cubes.count(pos.back()) && !cubes.count(pos.left()))
+        surf.connect({pos, direction_3d::back}, direction::right, {pos, direction_3d::left}, direction::left);
+
+    if (!cubes.count(pos.up()) && !cubes.count(pos.front()))
+        surf.connect({pos, direction_3d::up}, direction::down, {pos, direction_3d::front}, direction::up);
+    if (!cubes.count(pos.up()) && !cubes.count(pos.right()))
+        surf.connect({pos, direction_3d::up}, direction::right, {pos, direction_3d::right}, direction::up);
+    if (!cubes.count(pos.up()) && !cubes.count(pos.back()))
+        surf.connect({pos, direction_3d::up}, direction::up, {pos, direction_3d::back}, direction::up);
+    if (!cubes.count(pos.up()) && !cubes.count(pos.left()))
+        surf.connect({pos, direction_3d::up}, direction::left, {pos, direction_3d::left}, direction::up);
+
+    if (!cubes.count(pos.down()) && !cubes.count(pos.front()))
+        surf.connect({pos, direction_3d::down}, direction::down, {pos, direction_3d::front}, direction::down);
+    if (!cubes.count(pos.down()) && !cubes.count(pos.right()))
+        surf.connect({pos, direction_3d::down}, direction::left, {pos, direction_3d::right}, direction::down);
+    if (!cubes.count(pos.down()) && !cubes.count(pos.back()))
+        surf.connect({pos, direction_3d::down}, direction::up, {pos, direction_3d::back}, direction::down);
+    if (!cubes.count(pos.down()) && !cubes.count(pos.left()))
+        surf.connect({pos, direction_3d::down}, direction::right, {pos, direction_3d::left}, direction::down);
+}
+void polycube::connect_face_neighbors(position pos, surface &surf)
+{
+    if (cubes.count(pos.right()))
+    {
+        if (!cubes.count(pos.front()) && !cubes.count(pos.front().right()))
+            surf.connect({pos, direction_3d::front}, direction::right, {pos.right(), direction_3d::front}, direction::left);
+        if (!cubes.count(pos.up()) && !cubes.count(pos.up().right()))
+            surf.connect({pos, direction_3d::up}, direction::right, {pos.right(), direction_3d::up}, direction::left);
+        if (!cubes.count(pos.back()) && !cubes.count(pos.back().right()))
+            surf.connect({pos, direction_3d::back}, direction::left, {pos.right(), direction_3d::back}, direction::right);
+        if (!cubes.count(pos.down()) && !cubes.count(pos.down().right()))
+            surf.connect({pos, direction_3d::down}, direction::left, {pos.right(), direction_3d::down}, direction::right);
+    }
+    if (cubes.count(pos.up()))
+    {
+        if (!cubes.count(pos.front()) && !cubes.count(pos.front().up()))
+            surf.connect({pos, direction_3d::front}, direction::up, {pos.up(), direction_3d::front}, direction::down);
+        if (!cubes.count(pos.right()) && !cubes.count(pos.right().up()))
+            surf.connect({pos, direction_3d::right}, direction::up, {pos.up(), direction_3d::right}, direction::down);
+        if (!cubes.count(pos.back()) && !cubes.count(pos.back().up()))
+            surf.connect({pos, direction_3d::back}, direction::up, {pos.up(), direction_3d::back}, direction::down);
+        if (!cubes.count(pos.left()) && !cubes.count(pos.left().up()))
+            surf.connect({pos, direction_3d::left}, direction::up, {pos.up(), direction_3d::left}, direction::down);
+    }
+    if (cubes.count(pos.back()))
+    {
+        if (!cubes.count(pos.left()) && !cubes.count(pos.left().back()))
+            surf.connect({pos, direction_3d::left}, direction::left, {pos.back(), direction_3d::left}, direction::right);
+        if (!cubes.count(pos.up()) && !cubes.count(pos.up().back()))
+            surf.connect({pos, direction_3d::up}, direction::up, {pos.back(), direction_3d::up}, direction::down);
+        if (!cubes.count(pos.right()) && !cubes.count(pos.right().back()))
+            surf.connect({pos, direction_3d::right}, direction::right, {pos.back(), direction_3d::right}, direction::left);
+        if (!cubes.count(pos.down()) && !cubes.count(pos.down().back()))
+            surf.connect({pos, direction_3d::down}, direction::up, {pos.back(), direction_3d::down}, direction::down);
+    }
+}
+void polycube::connect_edge_neighbors(position pos, surface &surf)
+{
+    if (cubes.count(pos.up().front()))
+    {
+        if (!cubes.count(pos.front()))
+            surf.connect({pos, direction_3d::front}, direction::up, {pos.up().front(), direction_3d::down}, direction::up);
+        if (!cubes.count(pos.up()))
+            surf.connect({pos, direction_3d::up}, direction::down, {pos.up().front(), direction_3d::back}, direction::down);
+    }
+    if (cubes.count(pos.up().back()))
+    {
+        if (!cubes.count(pos.back()))
+            surf.connect({pos, direction_3d::back}, direction::up, {pos.up().back(), direction_3d::down}, direction::down);
+        if (!cubes.count(pos.up()))
+            surf.connect({pos, direction_3d::up}, direction::up, {pos.up().back(), direction_3d::front}, direction::down);
+    }
+    if (cubes.count(pos.up().left()))
+    {
+        if (!cubes.count(pos.left()))
+            surf.connect({pos, direction_3d::left}, direction::up, {pos.up().left(), direction_3d::down}, direction::left);
+        if (!cubes.count(pos.up()))
+            surf.connect({pos, direction_3d::up}, direction::left, {pos.up().left(), direction_3d::right}, direction::down);
+    }
+    if (cubes.count(pos.up().right()))
+    {
+        if (!cubes.count(pos.right()))
+            surf.connect({pos, direction_3d::right}, direction::up, {pos.up().right(), direction_3d::down}, direction::right);
+        if (!cubes.count(pos.up()))
+            surf.connect({pos, direction_3d::up}, direction::right, {pos.up().right(), direction_3d::left}, direction::down);
+    }
+    if (cubes.count(pos.back().left()))
+    {
+        if (!cubes.count(pos.left()))
+            surf.connect({pos, direction_3d::left}, direction::left, {pos.back().left(), direction_3d::front}, direction::right);
+        if (!cubes.count(pos.back()))
+            surf.connect({pos, direction_3d::back}, direction::right, {pos.back().left(), direction_3d::right}, direction::left);
+    }
+    if (cubes.count(pos.back().right()))
+    {
+        if (!cubes.count(pos.right()))
+            surf.connect({pos, direction_3d::right}, direction::right, {pos.back().right(), direction_3d::front}, direction::left);
+        if (!cubes.count(pos.back()))
+            surf.connect({pos, direction_3d::back}, direction::left, {pos.back().right(), direction_3d::left}, direction::right);
+    }
+}
+
+surface polycube::get_surface()
+{
+    surface surf;
+    for (auto pair : cubes)
+    {
+        position pos = pair.first;
+        connect_on_cube(pos, surf);
+        connect_face_neighbors(pos, surf);
+        connect_edge_neighbors(pos, surf);
+    }
+    return surf;
+}
 
 // returns false if there is a cycle
 bool polycube::ortho_dfs(position pos, position from)
@@ -629,6 +806,13 @@ int main()
     }
     if (pc.orthotree())
         std::cerr << "The polycube is an orthotree." << std::endl;
+    surface surf = pc.get_surface();
+    for(auto pair:surf.graph)
+    {
+        std::cerr << pair.first.pos.x << " " << pair.first.pos.y << " " << pair.first.pos.z << " " << pair.first.dir << ":" << std::endl;
+        for (auto fc : pair.second)
+            std::cerr << "\t" << fc.pos.x << " " << fc.pos.y << " " << fc.pos.z << " " << fc.dir << std::endl;
+    }
     if (pc.one_layer())
     {
         std::cerr << "The polycube is one-layered." << std::endl;
@@ -639,29 +823,33 @@ int main()
         pl_pc.calculate_holes();
         if (pc.orthotree())
         {
+            std::cerr << "The polycube contains no holes, it can be unfolded to a 3-wide stripe." << std::endl;
             unfolding uf = pl_pc.unfold_orthotree();
             std::cout << uf;
         }
         else if (pl_pc.h == 0)
         {
-            std::cerr << "The polycube contains no holes." << std::endl;
+            std::cerr << "The polycube contains no holes, it can be unfolded using simple algorithm." << std::endl;
             unfolding uf = pl_pc.unfold_no_holes();
             std::cout << uf;
         }
         else if (pl_pc.h == (int)pl_pc.hole_cubes.size())
         {
-            std::cerr << "The polycube contains " << pl_pc.h << " holes, all of which are cubic." << std::endl;
+            std::cerr << "The polycube contains " << pl_pc.h << " holes, all of which are cubic. I can unfold this." << std::endl;
             unfolding uf = pl_pc.unfold_1x1();
             std::cout << uf;
         }
         else if (pl_pc.big_holes())
         {
-            std::cerr << "The polycube contains " << pl_pc.h << " holes, all of which are at least 2-wide." << std::endl;
+            std::cerr << "The polycube contains " << pl_pc.h << " holes, all of which are at least 2-wide. I can unfold this." << std::endl;
             unfolding uf = pl_pc.unfold_big_holes();
             std::cout << uf;
         }
         else
+        {
             std::cerr << "The polycube contains " << pl_pc.h << " holes." << std::endl;
+            std::cerr << "I can't unfold general one-layer polycubes yet." << std::endl;
+        }
     }
     else
     {

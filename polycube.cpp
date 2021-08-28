@@ -220,7 +220,7 @@ public:
     std::map<face, std::set<face>> random_spanning_tree();
     unfolding get_bad_unfolding();
     int score();
-    void improve();
+    bool improve();
     void try_unfold();
 
 private:
@@ -231,6 +231,7 @@ private:
     void accumulate_dfs(face f, face from, std::map<face, std::set<face>> &t, std::vector<face> &acc);
 };
 
+// returns all reachable faces in vector acc
 void surface::accumulate_dfs(face f, face from, std::map<face, std::set<face>> &t, std::vector<face> &acc)
 {
     acc.push_back(f);
@@ -239,9 +240,11 @@ void surface::accumulate_dfs(face f, face from, std::map<face, std::set<face>> &
             accumulate_dfs(nb, f, t, acc);
 }
 
-void surface::improve()
+// tries to improve current unfolding at least a little
+bool surface::improve()
 {
     int best_score = score();
+    int last = best_score;
     std::map<face, std::set<face>> best_tree = tree, old_tree = tree;
     std::map<plane_position, std::vector<face>> best_plane = plane;
     for (auto pair : old_tree)
@@ -269,7 +272,7 @@ void surface::improve()
                         best_score = sc;
                         best_tree = tree;
                         best_plane = plane;
-                        return;
+                        return true;
                     }
                     tree[f1].erase(f2);
                     tree[f2].erase(f1);
@@ -279,8 +282,10 @@ void surface::improve()
     }
     tree = best_tree;
     plane = best_plane;
+    return best_score > last;
 }
 
+// fives score to unfolding with overlaps
 int surface::score()
 {
     int sc = 100 * plane.size();
@@ -295,6 +300,7 @@ int surface::score()
     return sc;
 }
 
+// creates unfolding from surface plane
 unfolding surface::get_bad_unfolding()
 {
     unfolding uf;
@@ -321,6 +327,7 @@ unfolding surface::get_bad_unfolding()
     return uf;
 }
 
+// dfs for unfolding surface with overlaps
 void surface::try_unfold_dfs(face f, plane_position pos, face from, direction::direction up_direction)
 {
     direction::direction dir = up_direction;
@@ -339,6 +346,7 @@ void surface::try_unfold_dfs(face f, plane_position pos, face from, direction::d
     }
 }
 
+// unfolds surface given spanning tree with overlaps
 void surface::try_unfold()
 {
     face start = tree.begin()->first;
@@ -348,6 +356,7 @@ void surface::try_unfold()
     try_unfold_dfs(start, {0, 0}, start, direction::up);
 }
 
+// dfs for generating spanning tree
 void surface::dfs(face f)
 {
     std::vector<direction::direction> dirs = {direction::up, direction::left, direction::down, direction::right};
@@ -363,6 +372,7 @@ void surface::dfs(face f)
     }
 }
 
+// generates spanning tree
 std::map<face, std::set<face>> surface::random_spanning_tree()
 {
     tree.clear();
@@ -370,6 +380,7 @@ std::map<face, std::set<face>> surface::random_spanning_tree()
     return tree;
 }
 
+// adds edge to the surface graph
 void surface::connect(face f1, direction::direction d1, face f2, direction::direction d2)
 {
     graph[f1][d1] = f2;
@@ -981,26 +992,6 @@ int main()
     }
     if (pc.orthotree())
         std::cerr << "The polycube is an orthotree." << std::endl;
-    surface surf = pc.get_surface();
-    surf.random_spanning_tree();
-    surf.try_unfold();
-    unfolding uff = surf.get_bad_unfolding();
-    std::cerr << "Unfolding using heuristics." << std::endl;
-    std::cerr << "Produced unfolding of score " << surf.score() << "." << std::endl;
-    std::cout << uff;
-    int last = surf.score();
-    while(1)
-    {
-        surf.improve();
-        uff = surf.get_bad_unfolding();
-        int sc = surf.score();
-        std::cerr << "Produced unfolding of score " << sc << "." << std::endl;
-        std::cout << uff;
-        if(sc == last)
-            break;
-        last = sc;    
-    }
-    return 0;
     if (pc.one_layer())
     {
         std::cerr << "The polycube is one-layered." << std::endl;
@@ -1036,12 +1027,32 @@ int main()
         else
         {
             std::cerr << "The polycube contains " << pl_pc.h << " holes." << std::endl;
-            std::cerr << "I can't unfold general one-layer polycubes yet." << std::endl;
+            std::cerr << "I can't unfold general one-layer polycubes yet. However, I will try to unfold it using heuristics. This may take a while." << std::endl;
+            surface surf = pc.get_surface();
+            surf.random_spanning_tree();
+            surf.try_unfold();
+            unfolding uf = surf.get_bad_unfolding();
+            std::cerr << "Unfolding using heuristics..." << std::endl;
+            while (surf.improve())
+                ;
+            uf = surf.get_bad_unfolding();
+            std::cerr << "Done." << std::endl;
+            std::cout << uf;
         }
     }
     else
     {
-        std::cerr << "I can only unfold one-layer polycubes now, this may change in the future." << std::endl;
+        std::cerr << "I can only unfold one-layer polycubes now. However, I will try to unfold it using heuristics. This may take a while." << std::endl;
+        surface surf = pc.get_surface();
+        surf.random_spanning_tree();
+        surf.try_unfold();
+        unfolding uf = surf.get_bad_unfolding();
+        std::cerr << "Unfolding using heuristics..." << std::endl;
+        while (surf.improve())
+            ;
+        uf = surf.get_bad_unfolding();
+        std::cerr << "Done." << std::endl;
+        std::cout << uf;
     }
     return 0;
 }

@@ -407,7 +407,7 @@ std::ostream &operator<<(std::ostream &os, unfolding &uf)
     {
         int x = square_size * (pair.first.x - minx) + margin;
         int y = square_size * (maxy - pair.first.y) + margin;
-        os << "<rect x=\"" << x << "\" y=\"" << y << "\" width=\"" << square_size << "\" height=\"" << square_size << "\", style=\"" << square_style[pair.second.type] << "\"/>" << std::endl;
+        os << "<rect x=\"" << x << "\" y=\"" << y << "\" width=\"" << square_size << "\" height=\"" << square_size << "\" style=\"" << square_style[pair.second.type] << "\"/>" << std::endl;
     }
     os << "</svg>" << std::endl;
     return os;
@@ -996,7 +996,7 @@ int main()
     {
         std::cerr << "The polycube is one-layered." << std::endl;
         plane_polycube pl_pc = pc.to_one_layer();
-        std ::cout << pl_pc;
+        // std ::cout << pl_pc;
         pl_pc.caluclate_circumference();
         std::cerr << "The circumference has lenght " << pl_pc.circumference.size() << "." << std::endl;
         pl_pc.calculate_holes();
